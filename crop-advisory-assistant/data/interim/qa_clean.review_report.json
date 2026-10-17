@@ -1,0 +1,13 @@
+{
+  "reviewed": 48,
+  "counts": {
+    "correct": 42,
+    "unsupported": 3,
+    "incorrect": 2,
+    "minor_issue": 1
+  },
+  "kept_total": 1462,
+  "of_total": 1463,
+  "error_rate_incorrect_or_unsupported": 0.104,
+  "fully_correct_rate": 0.875
+}
