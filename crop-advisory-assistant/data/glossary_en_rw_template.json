@@ -1,0 +1,11 @@
+[
+  {"en": "maize", "rw": []}, {"en": "bean", "rw": []}, {"en": "beans", "rw": []},
+  {"en": "cassava", "rw": []}, {"en": "potato", "rw": []}, {"en": "potatoes", "rw": []},
+  {"en": "late blight", "rw": []}, {"en": "early blight", "rw": []}, {"en": "bacterial wilt", "rw": []},
+  {"en": "gray leaf spot", "rw": []}, {"en": "northern corn leaf blight", "rw": []},
+  {"en": "maize lethal necrosis", "rw": []}, {"en": "bean rust", "rw": []}, {"en": "rust", "rw": []},
+  {"en": "angular leaf spot", "rw": []}, {"en": "anthracnose", "rw": []},
+  {"en": "cassava mosaic disease", "rw": []}, {"en": "cassava brown streak disease", "rw": []},
+  {"en": "extension officer", "rw": []}, {"en": "humidity", "rw": []}, {"en": "rainfall", "rw": []},
+  {"en": "fungus", "rw": []}, {"en": "leaves", "rw": []}, {"en": "planting material", "rw": []}
+]

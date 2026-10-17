@@ -1,0 +1,11 @@
+pypdf
+transformers>=4.46
+accelerate>=1.0
+bitsandbytes
+torch
+pandas
+matplotlib
+sentence-transformers
+faiss-cpu
+scikit-learn
+datasets

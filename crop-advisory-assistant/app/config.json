@@ -1,0 +1,15 @@
+{
+  "corpus_path": "../data/processed/corpus.jsonl",
+  "gate_dir": "../results/gate/best",
+  "retriever_dir": "../results/retriever/best_dense",
+  "retriever_mode": "hybrid",
+  "top_k": 3,
+  "llm_model": "Qwen/Qwen2.5-1.5B-Instruct",
+  "adapter_dir": "../results/runs/e4_lora_rag_climate/adapter",
+  "use_context": true,
+  "use_climate": true,
+  "max_new_tokens": 256,
+  "mt_backend": "nllb",
+  "mt_model": "facebook/nllb-200-distilled-600M",
+  "device": "auto"
+}

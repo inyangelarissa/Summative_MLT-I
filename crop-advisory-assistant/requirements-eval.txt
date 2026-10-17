@@ -1,0 +1,8 @@
+rouge_score
+bert_score
+sacrebleu
+scikit-learn
+scipy
+pandas
+matplotlib
+sentencepiece

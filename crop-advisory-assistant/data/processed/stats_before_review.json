@@ -1,0 +1,66 @@
+{
+  "n_chunks": 1515,
+  "docs_per_split": {
+    "train": 26,
+    "val": 4,
+    "test": 5
+  },
+  "splits": {
+    "train": {
+      "n": 1113,
+      "by_type": {
+        "qa": 950,
+        "climate": 72,
+        "ood": 91
+      },
+      "by_crop": {
+        "maize": 307,
+        "beans": 498,
+        "cassava": 119,
+        "potato": 98,
+        "none": 91
+      },
+      "avg_answer_words": 25.6
+    },
+    "val": {
+      "n": 270,
+      "by_type": {
+        "qa": 249,
+        "ood": 12,
+        "climate": 9
+      },
+      "by_crop": {
+        "cassava": 75,
+        "beans": 85,
+        "none": 12,
+        "maize": 96,
+        "potato": 2
+      },
+      "avg_answer_words": 23.2,
+      "bm25_recall@1": 0.233,
+      "bm25_recall@3": 0.388,
+      "bm25_recall@5": 0.446,
+      "bm25_mrr@10": 0.321
+    },
+    "test": {
+      "n": 312,
+      "by_type": {
+        "qa": 264,
+        "ood": 12,
+        "climate": 36
+      },
+      "by_crop": {
+        "maize": 116,
+        "beans": 56,
+        "none": 12,
+        "potato": 117,
+        "cassava": 11
+      },
+      "avg_answer_words": 29.4,
+      "bm25_recall@1": 0.267,
+      "bm25_recall@3": 0.4,
+      "bm25_recall@5": 0.48,
+      "bm25_mrr@10": 0.358
+    }
+  }
+}

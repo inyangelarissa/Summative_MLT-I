@@ -1,0 +1,10 @@
+transformers>=4.46
+peft>=0.13
+accelerate>=1.0
+datasets
+bitsandbytes
+evaluate
+rouge_score
+bert_score
+pandas
+matplotlib
