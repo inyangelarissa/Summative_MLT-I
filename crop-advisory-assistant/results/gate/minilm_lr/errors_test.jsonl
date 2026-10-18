@@ -1,0 +1,3 @@
+{"text": "How can I prevent bacterial wilt?", "label": 1, "p_in": 0.129, "category": "potato", "error": "false_reject"}
+{"text": "How do I register a farmers' cooperative?", "label": 0, "p_in": 0.247, "category": "farm_business", "error": "false_accept"}
+{"text": "What are the symptoms of malaria?", "label": 0, "p_in": 0.266, "category": "human_health", "error": "false_accept"}
