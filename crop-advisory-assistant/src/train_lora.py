@@ -177,6 +177,7 @@ def main():
     trainable, total = count_params(model)
     print(f"Trainable params: {trainable:,} / {total:,} ({100 * trainable / total:.3f}%)")
 
+    _steps = -(-len(train_ds) // (args.batch_size * args.grad_accum)) * args.epochs
     train_args = TrainingArguments(
         output_dir=str(out / "checkpoints"),
         per_device_train_batch_size=args.batch_size,
@@ -185,7 +186,7 @@ def main():
         learning_rate=args.lr,
         num_train_epochs=args.epochs,
         weight_decay=args.weight_decay,
-        warmup_ratio=args.warmup_ratio,
+        warmup_steps=max(1, int(args.warmup_ratio * _steps)),
         lr_scheduler_type="cosine",
         logging_steps=10,
         eval_strategy="epoch",          # needs transformers >= 4.46

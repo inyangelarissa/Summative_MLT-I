@@ -1,10 +1,15 @@
+#!/usr/bin/env python
+"""Drop chunks whose TEXT mentions no known crop or disease (reference lists, acknowledgements,
+author affiliations...). data_prep.py skips this check when sources.csv supplies a crop for the file.
+Run from repo root:  python src/filter_chunks.py data/interim/chunks.jsonl
+"""
 import json
 import sys
 from collections import Counter
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from data_prep import detect
+from data_prep import detect  # same detector the pipeline uses
 
 path = Path(sys.argv[1] if len(sys.argv) > 1 else "data/interim/chunks.jsonl")
 rows = [json.loads(l) for l in open(path, encoding="utf-8")]
