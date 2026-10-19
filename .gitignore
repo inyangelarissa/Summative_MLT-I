@@ -1,1 +1,22 @@
-crop-advisory-assistant/results/gate/distilbert_ckpt/
+
+results/runs/*/checkpoints/
+results/human_eval/key.json
+space/
+
+# Python environments and secrets
+.venv/
+venv/
+.env
+.env/
+
+# Generated model outputs
+crop-advisory-assistant/results/
+
+# Python cache
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# Dataset files
+crop-advisory-assistant/data/raw/*
+crop-advisory-assistant/data/raw/sources_template.csv
