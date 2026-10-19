@@ -1,8 +1,0 @@
-data/raw/*
-!data/raw/sources_template.csv
-results/runs/*/checkpoints/
-results/human_eval/key.json
-space/
-__pycache__/
-*.pyc
-.ipynb_checkpoints/

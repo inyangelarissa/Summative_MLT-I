@@ -1,3 +1,5 @@
+crop-advisory-assistant/results/gate/distilbert_ckpt/
+
 
 results/runs/*/checkpoints/
 results/human_eval/key.json
