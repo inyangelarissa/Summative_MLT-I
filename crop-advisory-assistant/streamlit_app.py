@@ -128,7 +128,7 @@ elif weather_mode == "Live weather (Open-Meteo)":
     location = st.selectbox("Rwanda location", list(RWANDA_LOCATIONS))
 
 if st.button("Get advice", type="primary", disabled=not question.strip()):
-    probability = float(gate.predict_proba([question])[0])
+    probability = float(gate.model.predict_proba([question])[0])
     threshold = float(getattr(gate, "threshold", 0.5))
     if probability < threshold:
         st.warning(
