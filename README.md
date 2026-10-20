@@ -8,7 +8,7 @@ retrieval, a LoRA-adapted language model, and optional weather context.
 
 | Resource | Link or location |
 |---|---|
-| Live Demo Link |  |
+| Live Demo Link |https://youtu.be/HsW2Q96BB8Y |
 | Live link app | https://crop-advisor-assistant.streamlit.app/   |
 | Free deployment | Deploy [`streamlit_app.py`](streamlit_app.py) on Streamlit Community Cloud |
 | Full local app | [`app/app.py`](app/app.py) |
