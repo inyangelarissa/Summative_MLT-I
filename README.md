@@ -8,6 +8,8 @@ retrieval, a LoRA-adapted language model, and optional weather context.
 
 | Resource | Link or location |
 |---|---|
+| Live Demo Link |  |
+| Live link app |  |
 | Free deployment | Deploy [`streamlit_app.py`](streamlit_app.py) on Streamlit Community Cloud |
 | Full local app | [`app/app.py`](app/app.py) |
 | LoRA training output | [`results/runs/e3_lora_rag/`](results/runs/e3_lora_rag/) |
@@ -167,6 +169,24 @@ The metrics for the selected LoRA run are stored in
 
 These are training-run metrics, not a replacement for human evaluation of
 agricultural correctness, factuality, or field usefulness.
+
+## 4. Architecture
+
+User Question
+      ↓
+Domain Gate
+      ↓
+Crop/Disease Selection
+      ↓
+BM25 Retrieval
+      ↓
+Retrieved Evidence
+      ↓
+Qwen2.5 + LoRA
+      ↓
+Safety/Grounding Filter
+      ↓
+Final Answer
 
 ## 5. Repository structure
 
