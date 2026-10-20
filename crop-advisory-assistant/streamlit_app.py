@@ -1,10 +1,15 @@
-"""Free-hosting Streamlit interface for the retrieval and climate advisory system.
+"""Streamlit interface for the climate-aware crop disease advisory assistant.
 
-This deployment intentionally omits the 1.5B parameter generator and LoRA adapter.
-It keeps the trained domain gate, BM25 retrieval, source evidence, and the
-rule-based climate assessment so it can run on a free CPU service.
+Two modes share one interface (same features as the Gradio app):
+  * Full model   - set FULL_MODEL=1 (env var or Streamlit secret) on a host with enough memory/GPU: the same
+                   AdvisoryPipeline as the Gradio app (gate -> hybrid retrieval -> LoRA generator -> safety filter).
+  * Lite (default, fits free hosting) - domain gate -> crop-filtered BM25 retrieval -> weather rules ->
+                   extractive advice from the retrieved passages. The 1.5B generator is NOT loaded.
 """
+import os
+import re
 import sys
+import time
 from pathlib import Path
 
 import streamlit as st
@@ -12,150 +17,270 @@ import streamlit as st
 BASE = Path(__file__).resolve().parent
 sys.path.insert(0, str(BASE / "src"))
 
-from domain_gate import DomainGate  # noqa: E402
-from knowledge import CLIMATE_RULES, assess, detect  # noqa: E402
-from retriever import BM25Retriever, load_corpus  # noqa: E402
 from weather import RWANDA_LOCATIONS, climate_from_values, fetch_week_summary  # noqa: E402
 
-GATE_DIR = BASE / "results" / "gate" / "best"
-CORPUS_PATH = BASE / "data" / "processed" / "corpus.jsonl"
-DISCLAIMER = (
-    "This is a retrieval-based research prototype, not a diagnosis or pesticide "
-    "prescription. Confirm symptoms and treatment with a local agricultural extension officer."
-)
+CROPS = ["maize", "beans", "cassava", "potato"]
+WEATHER_MODES = ["No weather", "Enter manually", "Live weather (Open-Meteo)"]
+STATUS = {"answered": "✅ In-domain question",
+          "out_of_domain": "⛔ Outside my scope (not a maize/bean/cassava/potato disease question)",
+          "empty": "Please type a question."}
+REFUSAL = ("I can only help with diseases of maize, beans, cassava and potato. "
+           "Please ask a question about one of these crops.")
+Q_LATE = "Should I be worried about late blight in my potato field this week?"
+EXAMPLES = [
+    ("Late blight: cool and wet", Q_LATE, "potato", WEATHER_MODES[1], 16, 92, 70),
+    ("Late blight: hot and dry", Q_LATE, "potato", WEATHER_MODES[1], 30, 40, 0),
+    ("Rust on bean leaves", "What causes rust on bean leaves and how can I prevent it?", "beans", WEATHER_MODES[0], 20, 70, 20),
+    ("Cassava mosaic", "How does cassava mosaic disease spread?", "cassava", WEATHER_MODES[0], 20, 70, 20),
+    ("Off-topic question", "Who won the football match yesterday?", "Any", WEATHER_MODES[0], 20, 70, 20),
+]
+GENERIC = {"disease", "virus", "common", "bean", "maize", "cassava", "potato"}
+TIP_WORDS = ("control", "manage", "avoid", "remove", "destroy", "resistant", "resistance", "rotation",
+             "rotate", "fungicide", "spray", "clean seed", "certified", "sanitation", "scout", "monitor",
+             "weed", "spacing", "drain", "irrigat", "burn", "bury", "intercrop", "plant early", "uproot")
+SKIP = re.compile(r"\d+(\.\d+)?\s*(g|kg|mg|ml|l)\b|/ha|per hectare|dose|dosage|et al|\(\d{4}\)|\bfig\.|\btable\b", re.I)
+
+
+def flag_on(name):
+    if os.environ.get(name) == "1":
+        return True
+    try:
+        return str(st.secrets.get(name, "")) == "1"
+    except Exception:
+        return False
+
+
+# ----------------------------------------------------------------------------- engines
+class FullEngine:
+    mode = "Full model: domain gate + hybrid retrieval + LoRA-tuned generator + safety filter"
+
+    def __init__(self):
+        from pipeline import AdvisoryPipeline, PipelineConfig
+        self.pipe = AdvisoryPipeline(PipelineConfig.from_json(str(BASE / "app" / "config.json")))
+        _ = self.pipe.gate, self.pipe.retriever
+
+    def answer(self, question, crop, climate):
+        return self.pipe.answer(question, "en", "en", crop, climate)
+
+
+class LiteEngine:
+    mode = "Lite (free hosting): domain gate + crop-filtered BM25 retrieval + weather rules"
+
+    def __init__(self):
+        from domain_gate import DomainGate
+        from retriever import BM25Retriever, load_corpus
+        self.corpus = load_corpus(str(BASE / "data" / "processed" / "corpus.jsonl"))
+        self.by_id = {c["chunk_id"]: c for c in self.corpus}
+        self.retrievers = {"Any": BM25Retriever(self.corpus)}
+        for crop in CROPS:
+            subset = [c for c in self.corpus if c.get("crop") == crop and c.get("diseases")]
+            if len(subset) < 5:
+                subset = [c for c in self.corpus if c.get("crop") == crop]
+            if subset:
+                self.retrievers[crop] = BM25Retriever(subset)
+        self.gate = DomainGate.load(str(BASE / "results" / "gate" / "best"))
+
+    def answer(self, question, crop, climate):
+        t0, timings = time.time(), {}
+        trace = {"crop": crop, "climate": climate, "question_en": question}
+        key = crop or "Any"
+        gate = self.gate.check(question if not crop else f"{question} ({crop})")
+        timings["gate"] = round(time.time() - t0, 3)
+        if not gate["in_domain"]:
+            return {**trace, "status": "out_of_domain", "gate": gate, "answer": REFUSAL, "answer_en": REFUSAL,
+                    "passages": [], "flags": [], "timings": timings}
+        t = time.time()
+        ids = self.retrievers.get(key, self.retrievers["Any"]).search([question], 3)[0]
+        passages = [self.by_id[i] for i in ids if i in self.by_id]
+        timings["retrieve"] = round(time.time() - t, 3)
+        advice, risk = make_advice(question, key, climate, passages)
+        timings["total"] = round(time.time() - t0, 3)
+        return {**trace, "status": "answered", "gate": gate, "answer": advice, "answer_en": advice, "risk": risk,
+                "passages": [{"chunk_id": p["chunk_id"], "source_doc": p.get("source_doc", ""), "title": p.get("title", ""),
+                              "url": p.get("url", ""), "text": p["text"]} for p in passages],
+                "flags": [], "timings": timings}
 
 
 @st.cache_resource
-def load_resources():
-    corpus = load_corpus(str(CORPUS_PATH))
-    retriever = BM25Retriever(corpus)
-    gate = DomainGate.load(str(GATE_DIR))
-    return corpus, retriever, gate
+def get_engine():
+    if flag_on("FULL_MODEL"):
+        return FullEngine()
+    return LiteEngine()
 
 
+# ----------------------------------------------------------------------------- lite-mode advice
 def climate_summary(climate):
-    return (
-        f"{climate['temperature_c']}°C, {climate['humidity_pct']}% humidity, "
-        f"{climate['rainfall_mm_7d']} mm rain in the last 7 days"
-    )
+    return (f"{climate['temperature_c']}°C, {climate['humidity_pct']}% humidity, "
+            f"{climate['rainfall_mm_7d']} mm rain in the last 7 days")
+
+
+def match_disease(question, crop):
+    from knowledge import DISEASES
+    words = set(re.findall(r"[a-z]+", question.lower()))
+    scores = {}
+    for name in DISEASES.get(crop, {}):
+        hit = sum(1 for w in name.split() if w not in GENERIC and w in words)
+        if hit:
+            scores[name] = hit
+    if not scores:
+        return None
+    best = max(scores.values())
+    top = [n for n, s in scores.items() if s == best]
+    return top[0] if len(top) == 1 else None
+
+
+def pick_disease(question, crop, passages):
+    from knowledge import detect
+    _, pairs = detect(question, manifest_crop=crop if crop != "Any" else None)
+    if pairs:
+        return pairs[0]
+    if crop != "Any":
+        name = match_disease(question, crop)
+        if name:
+            return (crop, name)
+    for passage in passages:
+        passage_crop, found = passage.get("crop"), passage.get("diseases") or []
+        if passage_crop and found and (crop == "Any" or passage_crop == crop):
+            return (passage_crop, found[0])
+    return None
+
+
+def extract_tips(passages, limit=3):
+    tips, seen = [], set()
+    for passage in passages:
+        for sentence in re.split(r"(?<=[.!?])\s+", passage["text"].replace("\n", " ")):
+            sentence = sentence.strip()
+            low = sentence.lower()
+            if 40 <= len(sentence) <= 260 and any(w in low for w in TIP_WORDS) and not SKIP.search(sentence) and low not in seen:
+                tips.append(sentence)
+                seen.add(low)
+        if len(tips) >= limit:
+            break
+    return tips[:limit]
 
 
 def make_advice(question, crop, climate, passages):
-    detected_crop, pairs = detect(question, manifest_crop=crop if crop != "Any" else None)
-    if not pairs and crop != "Any":
-        _, pairs = detect(f"{crop} {question}", manifest_crop=crop)
-
-    if not pairs:
-        return (
-            "I found relevant crop-disease evidence below. Compare the described symptoms "
-            "with your plants and seek confirmation before taking action."
-        ), None
-
-    selected = pairs[0]
-    rule = assess(selected[0], selected[1], climate) if climate else None
-    if rule:
-        risk = rule["risk"]
-        reason = CLIMATE_RULES[selected]["mechanism"]
-        advice = (
-            f"**Weather-based risk: {risk.upper()}** for {selected[1]} in {selected[0]}. "
-            f"{reason} Current conditions are {climate_summary(climate)}. "
-            "Scout the field regularly, avoid spreading plant material or soil between fields, "
-            "remove badly affected material away from the field, and contact an extension officer "
-            "about locally approved control options."
-        )
-        return advice, risk
-
-    return (
-        f"I found evidence about **{selected[1]}** in {selected[0]}. "
-        "The available weather rules do not cover this disease, so use the source evidence "
-        "and ask an extension officer to confirm the diagnosis and treatment."
-    ), None
+    from knowledge import CLIMATE_RULES, assess
+    selected, risk, parts = pick_disease(question, crop, passages), None, []
+    if selected:
+        crop_name, disease = selected
+        rule = assess(crop_name, disease, climate) if climate else None
+        if rule:
+            risk = rule["risk"]
+            mechanism = CLIMATE_RULES.get(selected, {}).get("mechanism", "")
+            parts.append(f"**Weather-based risk: {risk.upper()}** for {disease} in {crop_name}. {mechanism} "
+                         f"Current conditions: {climate_summary(climate)}.")
+        else:
+            parts.append(f"This looks like a question about **{disease}** in {crop_name}.")
+    else:
+        parts.append("I could not identify one specific disease, so here is what the most relevant sources say.")
+    tips = extract_tips(passages)
+    if tips:
+        parts.append("**What the sources say:**\n" + "\n".join(f"- {t}" for t in tips))
+    parts.append("Scout your field regularly, avoid moving plant material or soil between fields, "
+                 "and ask a local extension officer about approved control options.")
+    return "\n\n".join(parts), risk
 
 
-def resolve_weather(mode, temp, humidity, rain, location):
-    if mode == "Enter manually":
-        return climate_from_values(temp, humidity, rain), "Using the weather you entered."
-    if mode == "Live weather (Open-Meteo)":
+# ----------------------------------------------------------------------------- weather and rendering
+def resolve_weather(mode, temp, hum, rain, location):
+    if mode == WEATHER_MODES[1]:
+        return climate_from_values(temp, hum, rain), "Using the weather you entered."
+    if mode == WEATHER_MODES[2]:
         try:
             lat, lon = RWANDA_LOCATIONS[location]
-            climate = fetch_week_summary(lat, lon)
-            if climate:
-                return climate, f"Live regional weather for {location}."
-            return None, "No live weather data was returned."
-        except Exception as exc:
-            return None, f"Live weather unavailable ({type(exc).__name__}); continuing without it."
-    return None, "No weather context used."
+            clim = fetch_week_summary(lat, lon)
+            if clim:
+                return clim, f"Live weather for {location} (last 7 days, regional summary)."
+            return None, "Live weather returned no data; answering without weather."
+        except Exception as e:
+            return None, f"Could not fetch live weather ({type(e).__name__}); answering without weather."
+    return None, "No weather used."
 
 
+def render(result):
+    res, climate, wnote = result["res"], result["climate"], result["note"]
+    status = STATUS[res["status"]]
+    if res.get("gate"):
+        status += f"  (gate score {res['gate']['score']})"
+    st.markdown(f"**{status}**")
+    if res["status"] == "out_of_domain":
+        st.warning(res["answer"])
+    else:
+        st.markdown(res["answer"])
+        if res.get("flags"):
+            st.caption("⚠️ A statement with an unverified quantity was removed for safety.")
+        if res.get("risk"):
+            st.metric("Weather-based risk", res["risk"].upper())
+    with st.expander("Sources used"):
+        if not res["passages"]:
+            st.write("_No passages were used._")
+        for i, p in enumerate(res["passages"], 1):
+            label = p.get("title") or p.get("source_doc") or "Source"
+            link = f" ([link]({p['url']}))" if p.get("url") else ""
+            text = p["text"]
+            st.markdown(f"**[{i}] {label}**{link}\n\n> {text[:450]}{'…' if len(text) > 450 else ''}")
+    with st.expander("Weather and technical details"):
+        st.caption("Weather used")
+        st.json({"note": wnote, "weather": climate})
+        st.caption("Pipeline trace (English answer, gate, timings)")
+        st.json({k: res.get(k) for k in ("status", "question_en", "gate", "answer_en", "flags", "timings")})
+
+
+def load_example(i):
+    _, q, crop, mode, temp, hum, rain = EXAMPLES[i]
+    st.session_state.update(q=q, crop=crop, mode=mode, temp=temp, hum=hum, rain=rain, _run=True)
+
+
+# ----------------------------------------------------------------------------- page
 st.set_page_config(page_title="Crop Disease Advisory Assistant", page_icon="🌱", layout="wide")
 st.title("🌱 Climate-Aware Crop Disease Advisory Assistant")
-st.write(
-    "A free, retrieval-based assistant for maize, beans, cassava, and potato disease questions. "
-    "It shows the agricultural passages used to ground each response."
-)
-st.info("Free deployment mode: domain gate + BM25 retrieval + weather rules. No paid model endpoint is required.")
+st.write("Ask about diseases of **maize, beans, cassava and potato**. Optionally add recent weather so the advice "
+         "reflects disease risk.")
 
 try:
-    corpus, retriever, gate = load_resources()
+    engine = get_engine()
 except Exception as exc:
-    st.error(f"Could not load the advisory resources: {type(exc).__name__}: {exc}")
-    st.markdown(
-        "The deployment must include `data/processed/corpus.jsonl` and "
-        "`results/gate/best/gate_meta.json`, `model.joblib`, and the trained gate files. "
-        "Commit these paths to GitHub and redeploy."
-    )
+    st.error(f"Could not load the assistant: {type(exc).__name__}: {exc}")
     st.stop()
+st.caption(f"Mode: {engine.mode}")
 
-question = st.text_area(
-    "Your question",
-    placeholder="What causes rust on bean leaves and how can I prevent it?",
-    height=100,
-)
-crop = st.selectbox("Crop (optional)", ["Any", "maize", "beans", "cassava", "potato"])
-weather_mode = st.radio(
-    "Weather context",
-    ["No weather", "Enter manually", "Live weather (Open-Meteo)"],
-    horizontal=True,
-)
+for _k, _v in dict(q="", crop="Any", mode=WEATHER_MODES[0], temp=20, hum=70, rain=20, loc="Kigali").items():
+    st.session_state.setdefault(_k, _v)
 
-temp, humidity, rain, location = 20, 70, 20, "Kigali"
-if weather_mode == "Enter manually":
-    c1, c2, c3 = st.columns(3)
-    temp = c1.slider("Average temperature (°C)", 5, 38, 20)
-    humidity = c2.slider("Average humidity (%)", 20, 100, 70)
-    rain = c3.slider("Rainfall in last 7 days (mm)", 0, 200, 20)
-elif weather_mode == "Live weather (Open-Meteo)":
-    location = st.selectbox("Rwanda location", list(RWANDA_LOCATIONS))
+left, right = st.columns([3, 4], gap="large")
+with left:
+    question = st.text_area("Your question", key="q", height=110,
+                            placeholder="e.g. Should I be worried about late blight in my potato field this week?")
+    crop = st.selectbox("Crop (optional)", ["Any"] + CROPS, key="crop")
+    mode = st.radio("Weather context", WEATHER_MODES, key="mode")
+    temp, hum, rain, location = 20, 70, 20, "Kigali"
+    if mode == WEATHER_MODES[1]:
+        temp = st.slider("Average temperature (°C)", 5, 38, key="temp")
+        hum = st.slider("Average relative humidity (%)", 20, 100, key="hum")
+        rain = st.slider("Rainfall in the last 7 days (mm)", 0, 200, key="rain")
+    elif mode == WEATHER_MODES[2]:
+        location = st.selectbox("Location", list(RWANDA_LOCATIONS), key="loc")
+    clicked = st.button("Get advice", type="primary", key="go", use_container_width=True)
+    run = st.session_state.pop("_run", False) or clicked
 
-if st.button("Get advice", type="primary", disabled=not question.strip()):
-    probability = float(gate.model.predict_proba([question])[0])
-    threshold = float(getattr(gate, "threshold", 0.5))
-    if probability < threshold:
-        st.warning(
-            "This appears outside the assistant's scope. Please ask about a disease "
-            "affecting maize, beans, cassava, or potato."
-        )
-        st.caption(f"Domain-gate score: {probability:.3f} (threshold: {threshold:.3f})")
-        st.stop()
+with right:
+    if run:
+        if not question.strip():
+            st.session_state["result"] = None
+            st.warning(STATUS["empty"])
+        else:
+            climate, note = resolve_weather(mode, temp, hum, rain, location)
+            with st.spinner("Thinking…"):
+                res = engine.answer(question.strip(), None if crop == "Any" else crop, climate)
+            st.session_state["result"] = {"res": res, "climate": climate, "note": note}
+    if st.session_state.get("result"):
+        render(st.session_state["result"])
+    else:
+        st.info("Type a question and press **Get advice**, or try an example below.")
 
-    query = question if crop == "Any" else f"{question} (crop: {crop})"
-    ids = retriever.search([query], k=3)[0]
-    by_id = {item["chunk_id"]: item for item in corpus}
-    passages = [by_id[item_id] for item_id in ids if item_id in by_id]
-    climate, weather_note = resolve_weather(weather_mode, temp, humidity, rain, location)
-    advice, risk = make_advice(question, crop, climate, passages)
-
-    st.success("In-domain crop disease question")
-    st.caption(f"Domain-gate score: {probability:.3f} | {weather_note}")
-    st.markdown(advice)
-    if risk:
-        st.metric("Weather-based risk", risk.upper())
-    st.warning(DISCLAIMER)
-
-    with st.expander("Sources used", expanded=True):
-        for index, passage in enumerate(passages, 1):
-            title = passage.get("title") or passage.get("source_doc", "Source")
-            st.markdown(f"**[{index}] {title}**")
-            st.write(passage["text"][:900] + ("..." if len(passage["text"]) > 900 else ""))
-            if passage.get("url"):
-                st.markdown(f"[Open source]({passage['url']})")
+st.subheader("Try an example")
+st.caption("The first two differ only in the weather.")
+cols = st.columns(len(EXAMPLES))
+for i, (label, *_rest) in enumerate(EXAMPLES):
+    cols[i].button(label, key=f"ex{i}", on_click=load_example, args=(i,), use_container_width=True)
