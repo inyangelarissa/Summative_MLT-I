@@ -172,6 +172,7 @@ agricultural correctness, factuality, or field usefulness.
 
 ## 4. Architecture
 
+```text
 User Question
       ↓
 Domain Gate
@@ -187,6 +188,8 @@ Qwen2.5 + LoRA
 Safety/Grounding Filter
       ↓
 Final Answer
+
+```
 
 ## 5. Repository structure
 
